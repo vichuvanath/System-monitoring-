@@ -1,6 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Camera, Eye, EyeOff, Cpu, Wifi, AlertTriangle } from 'lucide-react';
 import { useMonitoring } from '../../contexts/MonitoringContext';
+import * as tf from '@tensorflow/tfjs';
+import * as cocoSsd from '@tensorflow-models/coco-ssd';
 
 const loadScriptWithFallbacks = async (urls: string[]): Promise<void> => {
   for (const src of urls) {
@@ -117,60 +119,38 @@ export const AICameraWidget: React.FC<AICameraWidgetProps> = ({
     };
   }, [unauthObject.detected, unauthObject.object, focusShift, warningsCount]);
 
-  // 1. Load TensorFlow.js / COCO-SSD and MediaPipe FaceMesh
+  // 1. Load Bundled TensorFlow.js / COCO-SSD and MediaPipe FaceMesh
   useEffect(() => {
     let active = true;
     const initVisionAI = async () => {
       try {
         setModelLoading(true);
-        setModelType('Loading TF.js & COCO-SSD...');
+        setModelType('Loading Neural Vision...');
 
-        await loadScriptWithFallbacks([
-          'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js',
-          'https://unpkg.com/@tensorflow/tfjs@4.22.0/dist/tf.min.js',
-          'https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.22.0/tf.min.js'
-        ]);
-
-        await loadScriptWithFallbacks([
-          'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js',
-          'https://unpkg.com/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js'
-        ]);
-
-        if (active && (window as any).cocoSsd) {
-          try {
-            if ((window as any).tf?.ready) {
-              await (window as any).tf.ready();
-            }
+        try {
+          await tf.ready();
+          const loadedModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+          if (active && loadedModel) {
+            setModel(loadedModel);
+            setModelType('COCO-SSD Neural Vision');
+            console.log('✅ In-browser COCO-SSD Object Detection AI loaded successfully from bundle.');
+          }
+        } catch (bundleErr) {
+          console.warn('Bundled COCO-SSD fallback to dynamic CDN:', bundleErr);
+          await loadScriptWithFallbacks([
+            'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js',
+            'https://unpkg.com/@tensorflow/tfjs@4.22.0/dist/tf.min.js'
+          ]);
+          await loadScriptWithFallbacks([
+            'https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js',
+            'https://unpkg.com/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js'
+          ]);
+          if (active && (window as any).cocoSsd) {
             const loadedModel = await (window as any).cocoSsd.load({ base: 'lite_mobilenet_v2' });
             if (active && loadedModel) {
               setModel(loadedModel);
               setModelType('COCO-SSD Neural Vision');
-              console.log('✅ In-browser COCO-SSD Object Detection AI loaded successfully.');
-            } else if (active) {
-              setModelType('Heuristic Vision Guard');
             }
-          } catch (modelErr) {
-            console.warn('COCO-SSD model init fallback:', modelErr);
-            if (active) setModelType('Heuristic Vision Guard');
-          }
-        } else {
-          // Poll for a few seconds if script loading was slightly delayed
-          for (let i = 0; i < 10; i++) {
-            await new Promise(r => setTimeout(r, 500));
-            if ((window as any).cocoSsd) {
-              try {
-                const loadedModel = await (window as any).cocoSsd.load({ base: 'lite_mobilenet_v2' });
-                if (active && loadedModel) {
-                  setModel(loadedModel);
-                  setModelType('COCO-SSD Neural Vision');
-                  console.log('✅ COCO-SSD Object Detection AI loaded after polling.');
-                }
-              } catch (e) {}
-              break;
-            }
-          }
-          if (active && !model) {
-            setModelType('Heuristic Vision Guard');
           }
         }
 
